@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cluster Lens — K-Means Image Segmentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#eef1f0; --panel:#ffffff; --ink:#1b2430; --muted:#5b6570;
+  --accent:#b8672e; --accent-ink:#ffffff; --line:#d7dbd7; --well:#e4e8e6;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10151a; --panel:#171e25; --ink:#e8ecef; --muted:#8b96a1;
+    --accent:#e8a33d; --accent-ink:#171e25; --line:#2a323c; --well:#1d252d;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10151a; --panel:#171e25; --ink:#e8ecef; --muted:#8b96a1;
+  --accent:#e8a33d; --accent-ink:#171e25; --line:#2a323c; --well:#1d252d;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;line-height:1.5;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  display:flex; min-height:100vh;}
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+
+.sidebar{width:230px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);
+  padding:26px 16px;position:sticky;top:env(safe-area-inset-top,0px);align-self:flex-start;
+  height:calc(100vh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));overflow-y:auto;
+  transition:width .18s ease, padding .18s ease;}
+.sidebar-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;}
+.menu-toggle{background:none;border:none;cursor:pointer;color:var(--muted);font-size:18px;
+  padding:6px 9px;border-radius:6px;line-height:1;flex-shrink:0;}
+.menu-toggle:hover{background:var(--well);color:var(--ink);}
+.brand-block{overflow:hidden;white-space:nowrap;}
+.brand{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:19px;margin:0 0 2px;letter-spacing:-0.01em;}
+.brand-sub{color:var(--muted);font-size:12px;}
+.navlist{display:flex;flex-direction:column;gap:3px;}
+.navitem{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:7px;cursor:pointer;
+  color:var(--muted);font-size:14px;border:none;background:none;width:100%;text-align:left;font-family:inherit;
+  white-space:nowrap;overflow:hidden;}
+.navitem .num{font-family:"IBM Plex Mono",monospace;font-size:11px;opacity:.75;flex-shrink:0;}
+.navitem:hover{background:var(--well);}
+.navitem.active{background:var(--well);color:var(--ink);font-weight:500;}
+.navitem.active .num{color:var(--accent);}
+
+.sidebar.collapsed{width:64px;padding:26px 10px;}
+.sidebar.collapsed .sidebar-top{justify-content:center;}
+.sidebar.collapsed .brand-block{display:none;}
+.sidebar.collapsed .navitem{justify-content:center;padding:11px 0;}
+.sidebar.collapsed .navlabel{display:none;}
+
+main{flex:1;min-width:0;padding:36px 30px 90px;}
+.content{max-width:1300px;}
+.view{display:none;}
+.view.active{display:block;}
+.page-title{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:clamp(24px,4vw,32px);margin:0 0 6px;letter-spacing:-0.01em;}
+.project-name{font-family:"Space Grotesk",sans-serif;font-weight:600;font-size:17px;color:var(--accent);margin:0 0 16px;}
+p.sub{color:var(--muted);max-width:58ch;margin:0 0 32px;font-size:14.5px;}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:18px;}
+.card h2{font-family:"Space Grotesk",sans-serif;font-size:17px;margin:0 0 4px;}
+.card p.hint{color:var(--muted);font-size:13.5px;margin:0 0 16px;}
+
+.steps{display:flex;flex-direction:column;gap:14px;margin-top:4px;}
+.step{display:flex;gap:14px;}
+.step .n{font-family:"IBM Plex Mono",monospace;color:var(--accent);font-weight:600;font-size:14px;flex-shrink:0;width:22px;}
+.step .t strong{display:block;font-size:14.5px;margin-bottom:2px;}
+.step .t span{color:var(--muted);font-size:13.5px;}
+
+.factgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:6px;}
+.fact{background:var(--well);border-radius:8px;padding:14px;}
+.fact .k{font-family:"IBM Plex Mono",monospace;font-size:18px;color:var(--accent);font-weight:600;}
+.fact .l{font-size:12.5px;color:var(--muted);margin-top:2px;}
+
+#drop{border:2px dashed var(--line);border-radius:8px;padding:34px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;}
+#drop.drag{border-color:var(--accent);background:var(--well);}
+#drop .icon{font-size:26px;display:block;margin-bottom:8px;}
+#drop .small{color:var(--muted);font-size:13px;margin-top:4px;}
+input[type=file]{display:none;}
+
+.row{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:6px;}
+.field{display:flex;flex-direction:column;gap:5px;min-width:130px;flex:1;}
+.field label{font-size:12.5px;color:var(--muted);}
+.field input[type=number]{font-family:"IBM Plex Mono",monospace;font-size:15px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--well);color:var(--ink);width:100%;}
+button{font-family:"Space Grotesk",sans-serif;font-weight:600;font-size:14px;border:none;border-radius:7px;padding:11px 20px;cursor:pointer;background:var(--accent);color:var(--accent-ink);}
+button:disabled{opacity:.45;cursor:default;}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
+.status{font-size:13px;color:var(--muted);margin-top:10px;min-height:18px;}
+.status.error{color:#c0392b;}
+
+.imgpanes{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;}
+.ipane{flex:1;min-width:220px;}
+.ipane h3{font-size:12.5px;color:var(--muted);font-weight:500;margin:0 0 8px;}
+.ipane img{max-width:100%;border-radius:6px;border:1px solid var(--line);display:block;background:var(--well);}
+table.legend{width:100%;border-collapse:collapse;margin-top:18px;font-family:"IBM Plex Mono",monospace;font-size:13px;}
+table.legend th,table.legend td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;}
+table.legend th{color:var(--muted);font-weight:500;font-size:11.5px;}
+table.error-table{width:100%;border-collapse:collapse;margin-top:10px;font-family:"IBM Plex Mono",monospace;font-size:13px;}
+table.error-table th,table.error-table td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;}
+table.error-table th{color:var(--muted);font-weight:500;font-size:11.5px;}
+table.error-table tr.current td{background:var(--well);}
+table.error-table tr.current td:first-child{font-weight:600;color:var(--accent);}
+table.error-table tr.best td:first-child{font-weight:600;}
+.swatch{width:16px;height:16px;border-radius:3px;display:inline-block;vertical-align:middle;margin-right:8px;border:1px solid var(--line);}
+.stat-line{font-family:"IBM Plex Mono",monospace;font-size:13.5px;color:var(--muted);margin-top:10px;}
+.stat-line b{color:var(--ink);font-weight:600;}
+#elbowCanvas{width:100%;height:460px;background:var(--well);border-radius:6px;display:block;cursor:crosshair;}
+.chart-wrap{position:relative;}
+.coord-readout{position:absolute;top:10px;right:12px;background:var(--panel);border:1px solid var(--line);
+  border-radius:6px;padding:6px 10px;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink);
+  pointer-events:none;line-height:1.4;}
+.coord-readout b{color:var(--accent);}
+.suggestion{margin-top:16px;background:var(--well);border:1px solid var(--accent);border-radius:8px;padding:16px 18px;}
+.suggestion .big{font-family:"IBM Plex Mono",monospace;font-size:22px;font-weight:600;color:var(--accent);}
+.suggestion p{margin:6px 0 0;font-size:13.5px;color:var(--muted);}
+.empty-note{background:var(--well);border:1px dashed var(--line);border-radius:8px;padding:20px;text-align:center;color:var(--muted);font-size:13.5px;}
+.hidden{display:none !important;}
+
+.contrib-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-top:6px;}
+.contrib-slot{border:1.5px dashed var(--line);border-radius:9px;padding:20px 14px;text-align:center;color:var(--muted);}
+.contrib-slot .avatar{width:44px;height:44px;border-radius:50%;background:var(--well);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-family:"Space Grotesk",sans-serif;font-weight:600;color:var(--muted);}
+.contrib-slot .name{font-size:13.5px;}
+
+@media (max-width:760px){
+  body{flex-direction:column;}
+  .sidebar{width:100%;height:auto;position:static;border-right:none;border-bottom:1px solid var(--line);padding:16px;}
+  .navlist{flex-direction:row;overflow-x:auto;gap:6px;}
+  .navitem{flex-shrink:0;}
+  main{padding:26px 18px 70px;}
+  .menu-toggle{display:none;}
+  .sidebar.collapsed{width:100%;padding:16px;}
+  .sidebar.collapsed .brand-block{display:block;}
+  .sidebar.collapsed .navlabel{display:inline;}
+}
+</style>
+</head>
+<body>
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-top">
+    <div class="brand-block">
+      <div class="brand">Cluster Lens</div>
+      <div class="brand-sub">K-Means image segmentation</div>
+    </div>
+    <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu" title="Toggle menu">⋮</button>
+  </div>
+  <div class="navlist">
+    <button class="navitem active" data-view="dashboard"><span class="num">01</span><span class="navlabel"> Dashboard</span></button>
+    <button class="navitem" data-view="segment"><span class="num">02</span><span class="navlabel"> Image Segmentation</span></button>
+    <button class="navitem" data-view="graphs"><span class="num">03</span><span class="navlabel"> Graphs</span></button>
+    <button class="navitem" data-view="error"><span class="num">04</span><span class="navlabel"> Error Analysis</span></button>
+    <button class="navitem" data-view="contrib"><span class="num">05</span><span class="navlabel"> Project Contributors</span></button>
+  </div>
+</nav>
+
+<main>
+<div class="content">
+
+  <!-- 01 DASHBOARD -->
+  <section class="view active" id="view-dashboard">
+    <h1 class="page-title">IPA Project</h1>
+    <p class="project-name">Project name — Image Segmentation Using K-Means Clustering</p>
+    <p class="sub">This project takes any photograph and reduces it to a handful of representative colours by clustering its pixels with K-Means. The clustering itself runs on a Python (Flask) backend — the browser only uploads the image and displays whatever the backend computes: the segmented image, a grid overlay, a cluster colour legend, quantisation-error statistics, and an elbow graph for choosing a good value of k.</p>
+
+    <div class="card">
+      <h2>What this project does</h2>
+      <p class="hint">Every pixel of an image is treated as a point in RGB colour space. The uploaded image is sent to a Flask backend, where <code>main.py</code> runs K-Means to group those points into k clusters, then repaints each pixel with its cluster's average colour — producing a simplified, posterised version of the image, plus the statistics behind that simplification.</p>
+      <div class="steps">
+        <div class="step"><span class="n">01</span><div class="t"><strong>Upload</strong><span>Drop in an image on the Image Segmentation tab — it's sent to the Flask backend.</span></div></div>
+        <div class="step"><span class="n">02</span><div class="t"><strong>Cluster</strong><span><code>main.py</code> runs K-Means (k-means++ initialised) in NumPy, grouping pixels by colour.</span></div></div>
+        <div class="step"><span class="n">03</span><div class="t"><strong>Visualise</strong><span>The backend returns the segmented image, already rendered with the grid overlay.</span></div></div>
+        <div class="step"><span class="n">04</span><div class="t"><strong>Compare</strong><span>The Graphs tab asks the backend to plot quantisation error against k.</span></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Quick facts</h2>
+      <div class="factgrid">
+        <div class="fact"><div class="k">Python backend</div><div class="l">All clustering runs server-side in main.py via NumPy</div></div>
+        <div class="fact"><div class="k">k-means++</div><div class="l">Smarter centroid initialisation than random picks</div></div>
+        <div class="fact"><div class="k">RGB space</div><div class="l">Clustering is done on normalised 0–1 colour values</div></div>
+        <div class="fact"><div class="k">Adjustable grid</div><div class="l">Overlay spacing is fully configurable, values-free</div></div>
+      </div>
+    </div>
+
+    <div class="actions"><button onclick="setView('segment')">Start segmenting →</button></div>
+  </section>
+
+  <!-- 02 IMAGE SEGMENTATION -->
+  <section class="view" id="view-segment">
+    <h1 class="page-title">Image Segmentation</h1>
+    <p class="sub">Drop an image, choose your settings, and the Flask backend runs K-Means and sends back the result.</p>
+
+    <div class="card">
+      <h2>Drop an image</h2>
+      <p class="hint">The image is uploaded to the local backend to be processed by main.py.</p>
+      <div id="drop">
+        <span class="icon">＋</span>
+        <div>Drag an image here, or click to browse</div>
+        <div class="small">JPG, PNG, WebP</div>
+        <input id="fileInput" type="file" accept="image/*">
+      </div>
+    </div>
+
+    <div class="card hidden" id="settingsStage">
+      <h2>Choose your clusters</h2>
+      <p class="hint">These settings are sent to /api/segment — larger images and higher k take longer to process.</p>
+      <div class="row">
+        <div class="field"><label for="kInput">Clusters (k)</label><input id="kInput" type="number" min="2" max="16" value="4"></div>
+        <div class="field"><label for="sizeInput">Max image size (px)</label><input id="sizeInput" type="number" min="40" max="500" value="220"></div>
+        <div class="field"><label for="gridInput">Grid spacing (px, 0 = off)</label><input id="gridInput" type="number" min="0" max="200" value="30"></div>
+      </div>
+      <div class="actions">
+        <button id="runBtn">Run segmentation</button>
+        <a class="hidden" id="downloadBtn" download="segmented.png"><button class="ghost" type="button">Download segmented PNG</button></a>
+      </div>
+      <div class="status" id="statusMsg"></div>
+    </div>
+
+    <div class="card hidden" id="resultStage">
+      <h2>Segmented result</h2>
+      <p class="hint">Each pixel is replaced by the colour of the cluster it was assigned to.</p>
+      <div class="imgpanes">
+        <div class="ipane"><h3>Original</h3><img id="origImg" alt="Original image"></div>
+        <div class="ipane"><h3 id="segLabel">Segmented</h3><img id="segImg" alt="Segmented image"></div>
+      </div>
+      <table class="legend" id="legendTable"></table>
+      <div class="stat-line" id="errorLine"></div>
+    </div>
+  </section>
+
+  <!-- 03 GRAPHS -->
+  <section class="view" id="view-graphs">
+    <h1 class="page-title">Graphs</h1>
+    <p class="sub">See how quantisation error changes as the number of clusters increases.</p>
+
+    <div class="card" id="elbowCard">
+      <h2>Error by cluster count</h2>
+      <p class="hint">Asks the backend to re-run K-Means for a range of k values on a pixel sample from your last uploaded image.</p>
+      <div id="elbowEmpty" class="empty-note">Run a segmentation first — this chart uses that image.</div>
+      <div id="elbowControls" class="hidden">
+        <div class="row">
+          <div class="field"><label for="kMin">Minimum k</label><input id="kMin" type="number" min="2" max="15" value="2"></div>
+          <div class="field"><label for="kMax">Maximum k</label><input id="kMax" type="number" min="2" max="16" value="9"></div>
+        </div>
+        <div class="actions"><button id="elbowBtn">Plot error curve</button></div>
+        <div class="status" id="elbowStatus"></div>
+        <div class="chart-wrap hidden" id="chartWrap">
+          <canvas id="elbowCanvas"></canvas>
+          <div class="coord-readout hidden" id="coordReadout"></div>
+        </div>
+        <div class="suggestion hidden" id="suggestionBox"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 ERROR ANALYSIS -->
+  <section class="view" id="view-error">
+    <h1 class="page-title">Error Analysis</h1>
+    <p class="sub">View every mean quantisation-error value returned by the backend for the k range used in the last error-curve calculation.</p>
+
+    <div class="card">
+      <h2>Quantisation error by k</h2>
+      <p class="hint">These values are the same <code>mean error / pixel</code> values plotted in the Graphs tab. Run <b>Plot error curve</b> to refresh the table.</p>
+      <div id="errorAnalysisEmpty" class="empty-note">Run a segmentation first, then plot the error curve from the Graphs tab.</div>
+      <div id="errorAnalysisContent" class="hidden">
+        <div class="stat-line" id="errorAnalysisSummary"></div>
+        <div style="overflow-x:auto;">
+          <table class="error-table" id="errorAnalysisTable"></table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 CONTRIBUTORS -->
+  <section class="view" id="view-contrib">
+    <h1 class="page-title">Project Contributors</h1>
+    <p class="sub">The people behind Cluster Lens.</p>
+    <div class="card">
+      <div class="contrib-grid" id="contribGrid">
+        <div class="contrib-slot"><div class="avatar">?</div><div class="name">Awaiting details</div></div>
+      </div>
+      <p class="hint" style="margin-top:16px;">Send over names and roles and they'll be added here.</p>
+    </div>
+  </section>
+
+</div>
+</main>
+
+<script>
+function setView(view){
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-'+view).classList.add('active');
+  document.querySelectorAll('.navitem').forEach(b => b.classList.toggle('active', b.dataset.view===view));
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+document.querySelectorAll('.navitem').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+
+document.getElementById('menuToggle').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+});
+
+const dropZone = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+const settingsStage = document.getElementById('settingsStage');
+const resultStage = document.getElementById('resultStage');
+const statusMsg = document.getElementById('statusMsg');
+const elbowStatus = document.getElementById('elbowStatus');
+const downloadBtn = document.getElementById('downloadBtn');
+const elbowEmpty = document.getElementById('elbowEmpty');
+const elbowControls = document.getElementById('elbowControls');
+const errorAnalysisEmpty = document.getElementById('errorAnalysisEmpty');
+const errorAnalysisContent = document.getElementById('errorAnalysisContent');
+const errorAnalysisTable = document.getElementById('errorAnalysisTable');
+const errorAnalysisSummary = document.getElementById('errorAnalysisSummary');
+
+let currentFile = null;
+let lastK = 4;
+let lastElbowData = null;
+
+dropZone.addEventListener('click', () => fileInput.click());
+['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('drag'); }));
+dropZone.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) selectFile(f); });
+fileInput.addEventListener('change', e => { const f = e.target.files[0]; if (f) selectFile(f); });
+
+function resetErrorAnalysis(){
+  lastElbowData = null;
+  elbowState = null;
+  document.getElementById('chartWrap').classList.add('hidden');
+  document.getElementById('suggestionBox').classList.add('hidden');
+  errorAnalysisContent.classList.add('hidden');
+  errorAnalysisEmpty.classList.remove('hidden');
+  errorAnalysisTable.innerHTML = '';
+  errorAnalysisSummary.textContent = '';
+}
+
+function selectFile(file){
+  currentFile = file;
+  resetErrorAnalysis();
+  settingsStage.classList.remove('hidden');
+  resultStage.classList.add('hidden');
+}
+
+document.getElementById('runBtn').addEventListener('click', async () => {
+  if (!currentFile) return;
+  const runBtn = document.getElementById('runBtn');
+  runBtn.disabled = true;
+  statusMsg.classList.remove('error');
+  statusMsg.textContent = 'Uploading and running K-Means on the backend…';
+
+  const k = Math.max(2, parseInt(document.getElementById('kInput').value) || 4);
+  const maxSize = parseInt(document.getElementById('sizeInput').value) || 220;
+  const gridSize = Math.max(0, parseInt(document.getElementById('gridInput').value) || 0);
+
+  const formData = new FormData();
+  formData.append('image', currentFile);
+  formData.append('k', k);
+  formData.append('max_size', maxSize);
+  formData.append('grid_size', gridSize);
+
+  try {
+    const res = await fetch('/api/segment', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Segmentation failed.');
+
+    document.getElementById('origImg').src = 'data:image/png;base64,' + data.original_png;
+    document.getElementById('segImg').src = 'data:image/png;base64,' + data.segmented_png;
+    document.getElementById('segLabel').textContent = `Segmented, k=${k}`;
+
+    let rows = '<tr><th>Cluster</th><th>Colour</th><th>R</th><th>G</th><th>B</th><th>Luminance</th></tr>';
+    data.legend.forEach(c => {
+      rows += `<tr><td>${c.cluster}</td><td><span class="swatch" style="background:rgb(${c.r},${c.g},${c.b})"></span></td><td>${c.r}</td><td>${c.g}</td><td>${c.b}</td><td>${c.luminance}</td></tr>`;
+    });
+    document.getElementById('legendTable').innerHTML = rows;
+
+    const st = data.error_stats;
+    document.getElementById('errorLine').innerHTML =
+      `Quantisation error — inertia: <b>${st.inertia}</b> · mean per pixel: <b>${st.mean_error}</b> · RMSE (0–255 scale): <b>${st.rmse_255}</b>`;
+
+    downloadBtn.href = 'data:image/png;base64,' + data.segmented_png;
+    downloadBtn.classList.remove('hidden');
+    resultStage.classList.remove('hidden');
+    resetErrorAnalysis();
+    elbowEmpty.classList.add('hidden');
+    elbowControls.classList.remove('hidden');
+    statusMsg.textContent = 'Done. See the Graphs tab for the error curve and Error Analysis for every calculated error value.';
+    lastK = k;
+  } catch (err) {
+    statusMsg.classList.add('error');
+    statusMsg.textContent = err.message;
+  } finally {
+    runBtn.disabled = false;
+  }
+});
+
+document.getElementById('elbowBtn').addEventListener('click', async () => {
+  if (!currentFile) return;
+  const elbowBtn = document.getElementById('elbowBtn');
+  elbowBtn.disabled = true;
+  elbowStatus.classList.remove('error');
+  elbowStatus.textContent = 'Asking the backend to compute the error curve…';
+
+  const kMin = Math.max(2, parseInt(document.getElementById('kMin').value) || 2);
+  const kMax = Math.max(kMin, parseInt(document.getElementById('kMax').value) || 9);
+  const maxSize = parseInt(document.getElementById('sizeInput').value) || 220;
+
+  const formData = new FormData();
+  formData.append('image', currentFile);
+  formData.append('k_min', kMin);
+  formData.append('k_max', kMax);
+  formData.append('max_size', maxSize);
+
+  try {
+    const res = await fetch('/api/elbow', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Elbow computation failed.');
+    const suggestedK = findElbowK(data.k_values, data.mean_errors);
+    lastElbowData = { kValues: data.k_values, meanErrors: data.mean_errors, suggestedK };
+
+    const chartWrap = document.getElementById('chartWrap');
+    chartWrap.classList.remove('hidden');
+    requestAnimationFrame(() => {
+      drawElbow(data.k_values, data.mean_errors, lastK, suggestedK);
+    });
+    renderErrorAnalysis(data.k_values, data.mean_errors, lastK, suggestedK);
+
+    const box = document.getElementById('suggestionBox');
+    box.classList.remove('hidden');
+    box.innerHTML = `<div>Suggested best k: <span class="big">${suggestedK}</span></div>
+      <p>This is the "elbow" — the point where the curve bends most sharply, found as the k value farthest from a straight line drawn between the first and last points. Beyond it, adding more clusters keeps lowering the error but only by a shrinking amount.</p>`;
+    elbowStatus.textContent = '';
+  } catch (err) {
+    elbowStatus.classList.add('error');
+    elbowStatus.textContent = err.message;
+  } finally {
+    elbowBtn.disabled = false;
+  }
+});
+
+function renderErrorAnalysis(ks, errs, chosenK, suggestedK){
+  if (!Array.isArray(ks) || !Array.isArray(errs) || !ks.length) return;
+
+  errorAnalysisEmpty.classList.add('hidden');
+  errorAnalysisContent.classList.remove('hidden');
+  errorAnalysisSummary.innerHTML = `Calculated <b>${ks.length}</b> k values (${ks[0]} to ${ks[ks.length - 1]}). Current segmentation k: <b>${chosenK}</b> · Suggested elbow k: <b>${suggestedK}</b>`;
+
+  let rows = '<tr><th>K (clusters)</th><th>Mean quantisation error / pixel</th><th>Status</th></tr>';
+  ks.forEach((k, i) => {
+    const isChosen = k === chosenK;
+    const isSuggested = k === suggestedK;
+    const rowClasses = [isChosen ? 'current' : '', isSuggested ? 'best' : ''].filter(Boolean).join(' ');
+    const status = isChosen && isSuggested ? 'Current · suggested' : (isChosen ? 'Current k' : (isSuggested ? 'Suggested elbow' : '—'));
+    rows += `<tr class="${rowClasses}"><td>${k}</td><td>${Number(errs[i]).toFixed(8)}</td><td>${status}</td></tr>`;
+  });
+  errorAnalysisTable.innerHTML = rows;
+}
+
+// Finds the "elbow" k: the point on the curve with the greatest perpendicular
+// distance from the straight line joining the first and last points, after
+// normalising both axes to 0-1 so neither scale dominates the distance.
+function findElbowK(ks, errs){
+  const n = ks.length;
+  if (n < 3) return ks[0];
+  const kMin=ks[0], kMax=ks[n-1], eMin=Math.min(...errs), eMax=Math.max(...errs);
+  const nx = ks.map(k => (k-kMin)/((kMax-kMin)||1));
+  const ny = errs.map(e => (e-eMin)/((eMax-eMin)||1));
+  const x1=nx[0], y1=ny[0], x2=nx[n-1], y2=ny[n-1];
+  let bestIdx = 0, bestDist = -1;
+  for (let i=0;i<n;i++){
+    const num = Math.abs((y2-y1)*nx[i] - (x2-x1)*ny[i] + x2*y1 - y2*x1);
+    const den = Math.sqrt((y2-y1)**2 + (x2-x1)**2) || 1;
+    const dist = num/den;
+    if (dist > bestDist){ bestDist = dist; bestIdx = i; }
+  }
+  return ks[bestIdx];
+}
+
+let elbowState = null; // cached chart data + layout, used by the hover handler
+
+function niceTicks(min, max, count){
+  if (min === max){ min -= 1; max += 1; }
+  const span = max - min;
+  const rawStep = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  let step;
+  if (norm < 1.5) step = 1*mag; else if (norm < 3) step = 2*mag; else if (norm < 7) step = 5*mag; else step = 10*mag;
+  const niceMin = Math.floor(min/step)*step;
+  const niceMax = Math.ceil(max/step)*step;
+  const ticks = [];
+  for (let v=niceMin; v<=niceMax+step*0.5; v+=step) ticks.push(v);
+  return ticks;
+}
+
+function drawElbow(ks, errs, chosenK, suggestedK){
+  const canvas = document.getElementById('elbowCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.max(rect.width, 600);
+  const H = 460;
+
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  canvas.style.width = '100%';
+  canvas.style.height = H + 'px';
+
+  const rawMax = Math.max(...errs), rawMin = Math.min(...errs);
+  const yTicks = niceTicks(rawMin, rawMax, 5);
+  const minErr = yTicks[0], maxErr = yTicks[yTicks.length-1];
+
+  const padL=66, padR=20, padT=18, padB=40;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+  const xFor = k => padL + (k-ks[0])/(ks[ks.length-1]-ks[0] || 1) * plotW;
+  const yFor = e => padT + (1 - (e-minErr)/((maxErr-minErr)||1)) * plotH;
+  const kFromX = x => ks[0] + ((x-padL)/plotW) * (ks[ks.length-1]-ks[0]);
+  const errFromY = y => maxErr - ((y-padT)/plotH) * (maxErr-minErr);
+
+  elbowState = {canvas, W, H, ks, errs, chosenK, suggestedK, padL, padR, padT, padB, plotW, plotH, xFor, yFor, kFromX, errFromY, yTicks};
+  renderElbow(null);
+}
+
+function renderElbow(mouse){
+  const s = elbowState;
+  if (!s) return;
+  const {canvas, W, H, ks, errs, chosenK, suggestedK, padL, padT, padB, plotW, plotH, xFor, yFor, yTicks} = s;
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+
+  const styles = getComputedStyle(document.documentElement);
+  const ink = styles.getPropertyValue('--ink').trim();
+  const muted = styles.getPropertyValue('--muted').trim();
+  const accent = styles.getPropertyValue('--accent').trim();
+  const line = styles.getPropertyValue('--line').trim();
+
+  // gridlines
+  ctx.strokeStyle = line; ctx.lineWidth = 1;
+  yTicks.forEach(v => {
+    const y = yFor(v);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W-s.padR, y); ctx.stroke();
+  });
+  ks.forEach(k => {
+    const x = xFor(k);
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H-padB); ctx.stroke();
+  });
+
+  // axes
+  ctx.strokeStyle = muted; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, H-padB); ctx.lineTo(W-s.padR, H-padB); ctx.stroke();
+
+  // tick labels
+  ctx.fillStyle = muted; ctx.font = '11px "IBM Plex Mono", monospace';
+  ctx.textAlign = 'center';
+  ks.forEach(k => ctx.fillText(k, xFor(k), H-padB+18));
+  ctx.textAlign = 'right';
+  yTicks.forEach(v => ctx.fillText(v.toFixed(4), padL-10, yFor(v)+4));
+
+  // axis titles
+  ctx.textAlign = 'center';
+  ctx.fillText('k (clusters)', padL+plotW/2, H-6);
+  ctx.save();
+  ctx.translate(16, padT+plotH/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText('mean error / pixel', 0, 0);
+  ctx.restore();
+
+  // data line
+  ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.beginPath();
+  ks.forEach((k,i) => { const x=xFor(k), y=yFor(errs[i]); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  ctx.stroke();
+
+  ctx.textAlign = 'center';
+  ks.forEach((k,i) => {
+    const x=xFor(k), y=yFor(errs[i]);
+    const isChosen = k === chosenK, isSuggested = k === suggestedK;
+    if (isSuggested){
+      ctx.beginPath();
+      ctx.strokeStyle = ink; ctx.lineWidth = 2;
+      ctx.arc(x,y,8,0,Math.PI*2); ctx.stroke();
+    }
+    ctx.beginPath();
+    if (isChosen){
+      ctx.fillStyle = accent;
+      ctx.arc(x,y,5,0,Math.PI*2); ctx.fill();
+    } else {
+      ctx.fillStyle = ink;
+      ctx.arc(x,y,3,0,Math.PI*2); ctx.fill();
+    }
+    if (isChosen || isSuggested){
+      const label = isChosen && isSuggested ? 'chosen · best' : (isChosen ? 'chosen' : 'best k');
+      ctx.fillStyle = ink; ctx.font='11px "IBM Plex Mono", monospace';
+      ctx.fillText(label, x, y-14);
+    }
+  });
+
+  // crosshair + coordinate readout
+  const readout = document.getElementById('coordReadout');
+  if (mouse && mouse.x >= padL && mouse.x <= W-s.padR && mouse.y >= padT && mouse.y <= H-padB){
+    ctx.strokeStyle = accent; ctx.setLineDash([4,4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(mouse.x, padT); ctx.lineTo(mouse.x, H-padB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL, mouse.y); ctx.lineTo(W-s.padR, mouse.y); ctx.stroke();
+    ctx.setLineDash([]);
+
+    const kVal = s.kFromX(mouse.x);
+    const errVal = s.errFromY(mouse.y);
+    readout.innerHTML = `k: <b>${kVal.toFixed(2)}</b> &nbsp; error: <b>${errVal.toFixed(5)}</b>`;
+    readout.classList.remove('hidden');
+  } else {
+    readout.classList.add('hidden');
+  }
+}
+
+(function setupElbowHover(){
+  const canvas = document.getElementById('elbowCanvas');
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    renderElbow({x: e.clientX-rect.left, y: e.clientY-rect.top});
+  });
+  canvas.addEventListener('mouseleave', () => renderElbow(null));
+})();
+
+window.addEventListener('resize', () => {
+  if (!elbowState || !lastElbowData) return;
+  requestAnimationFrame(() => {
+    drawElbow(lastElbowData.kValues, lastElbowData.meanErrors, lastK, lastElbowData.suggestedK);
+  });
+});
+</script>
+</body>
+</html>
