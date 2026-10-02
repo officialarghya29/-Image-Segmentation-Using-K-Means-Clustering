@@ -16,7 +16,7 @@ import io
 import base64
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, UnidentifiedImageError
 
 
 # ---------------------------------------------------------------------------
@@ -24,17 +24,54 @@ from PIL import Image, ImageDraw
 # ---------------------------------------------------------------------------
 
 def load_image_from_bytes(file_bytes: bytes, max_size: int = 220) -> np.ndarray:
-    """Decode uploaded image bytes into an RGB uint8 numpy array, resized so
-    its largest dimension is at most max_size (keeps K-Means fast)."""
-    img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-    width, height = img.size
+    """Decode uploaded image bytes into a resized RGB uint8 array."""
+    if not file_bytes:
+        raise ValueError("The uploaded image is empty.")
+    if not isinstance(max_size, int) or not 1 <= max_size <= 500:
+        raise ValueError("max_size must be between 1 and 500 pixels.")
+
+    try:
+        with Image.open(io.BytesIO(file_bytes)) as source:
+            width, height = source.size
+            if width < 1 or height < 1 or width * height > 40_000_000:
+                raise ValueError("The image dimensions are unsupported (maximum 40 megapixels).")
+            img = source.convert("RGB")
+    except Image.DecompressionBombError as exc:
+        raise ValueError("The image is too large to process safely.") from exc
+    except (UnidentifiedImageError, OSError, SyntaxError) as exc:
+        raise ValueError("The uploaded file is not a valid supported image.") from exc
+
     largest = max(width, height)
-
-    if max_size and largest > max_size:
+    if largest > max_size:
         scale = max_size / largest
-        img = img.resize((max(1, int(width * scale)), max(1, int(height * scale))), Image.LANCZOS)
+        img = img.resize((max(1, int(width * scale)), max(1, int(height * scale))), Image.Resampling.LANCZOS)
 
-    return np.array(img)
+    return np.asarray(img, dtype=np.uint8)
+
+
+def _assign_clusters(pixels: np.ndarray, centers: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Assign pixels to nearest center without allocating an (n, k, 3) array."""
+    distances = (
+        np.sum(pixels * pixels, axis=1)[:, None]
+        + np.sum(centers * centers, axis=1)[None, :]
+        - 2 * pixels @ centers.T
+    )
+    np.maximum(distances, 0, out=distances)
+    labels = np.argmin(distances, axis=1)
+    return labels, distances[np.arange(pixels.shape[0]), labels]
+
+
+def _validate_kmeans_input(pixels: np.ndarray, k: int, iterations: int) -> None:
+    if not isinstance(pixels, np.ndarray) or pixels.ndim != 2 or pixels.shape[1] != 3:
+        raise ValueError("pixels must be a two-dimensional RGB array.")
+    if pixels.shape[0] == 0:
+        raise ValueError("At least one pixel is required.")
+    if not isinstance(k, (int, np.integer)) or not 1 <= k <= pixels.shape[0]:
+        raise ValueError("k must be between 1 and the number of pixels.")
+    if not isinstance(iterations, (int, np.integer)) or iterations < 1:
+        raise ValueError("iterations must be a positive integer.")
+    if not np.isfinite(pixels).all():
+        raise ValueError("pixels must contain only finite values.")
 
 
 # ---------------------------------------------------------------------------
@@ -68,13 +105,14 @@ def kmeans(pixels: np.ndarray, k: int, iterations: int = 25, seed: int = 42):
         centers: (k, 3) cluster center colors, normalised 0-1
         inertia: total squared-distance quantisation error
     """
+    _validate_kmeans_input(pixels, k, iterations)
+    pixels = np.asarray(pixels, dtype=np.float64)
     rng = np.random.default_rng(seed)
     centers = _kmeans_plusplus_init(pixels, k, rng)
     labels = np.zeros(pixels.shape[0], dtype=np.int64)
 
     for _ in range(iterations):
-        distances = np.linalg.norm(pixels[:, None, :] - centers[None, :, :], axis=2)
-        labels = np.argmin(distances, axis=1)
+        labels, _ = _assign_clusters(pixels, centers)
 
         new_centers = centers.copy()
         for c in range(k):
@@ -87,9 +125,8 @@ def kmeans(pixels: np.ndarray, k: int, iterations: int = 25, seed: int = 42):
             break
         centers = new_centers
 
-    distances = np.linalg.norm(pixels[:, None, :] - centers[None, :, :], axis=2)
-    labels = np.argmin(distances, axis=1)
-    inertia = float(np.sum((pixels - centers[labels]) ** 2))
+    labels, min_distances = _assign_clusters(pixels, centers)
+    inertia = float(np.sum(min_distances))
 
     return labels, centers, inertia
 
@@ -104,6 +141,9 @@ def segment_image(image_rgb: np.ndarray, k: int, iterations: int = 25):
         inertia:         total quantisation error (normalised 0-1 scale)
         pixel_count:      number of pixels clustered
     """
+    image_rgb = np.asarray(image_rgb)
+    if image_rgb.ndim != 3 or image_rgb.shape[2] != 3 or image_rgb.size == 0:
+        raise ValueError("image_rgb must be a non-empty RGB image.")
     height, width, _ = image_rgb.shape
     pixels = image_rgb.reshape(-1, 3).astype(np.float64) / 255.0
 
@@ -122,7 +162,9 @@ def segment_image(image_rgb: np.ndarray, k: int, iterations: int = 25):
 def add_grid(image_rgb: np.ndarray, spacing: int) -> np.ndarray:
     """Draw grid lines only (no text/values) over an image, spaced `spacing`
     pixels apart."""
-    if spacing <= 0:
+    if not isinstance(spacing, (int, np.integer)) or spacing < 0:
+        raise ValueError("spacing must be a non-negative integer.")
+    if spacing == 0:
         return image_rgb
 
     img = Image.fromarray(image_rgb)
@@ -152,6 +194,8 @@ def cluster_legend(centers_255: np.ndarray) -> list:
 
 def error_stats(inertia: float, pixel_count: int) -> dict:
     """Quantisation error stats: mean error per pixel and RMSE on 0-255 scale."""
+    if pixel_count <= 0:
+        raise ValueError("pixel_count must be positive.")
     mean_error = inertia / pixel_count
     rmse_255 = float(np.sqrt(mean_error) * 255)
     return {
@@ -169,6 +213,13 @@ def compute_elbow(image_rgb: np.ndarray, k_min: int, k_max: int,
                    sample_pixels: int = 3000, iterations: int = 15, seed: int = 42):
     """Run K-Means for a range of k values on a sampled subset of pixels,
     returning (k_values, mean_error_per_pixel) for plotting."""
+    if k_min < 1 or k_max < k_min:
+        raise ValueError("k_min must be positive and k_max must be at least k_min.")
+    if sample_pixels < 1 or iterations < 1:
+        raise ValueError("sample_pixels and iterations must be positive.")
+    image_rgb = np.asarray(image_rgb)
+    if image_rgb.ndim != 3 or image_rgb.shape[2] != 3 or image_rgb.size == 0:
+        raise ValueError("image_rgb must be a non-empty RGB image.")
     all_pixels = image_rgb.reshape(-1, 3).astype(np.float64) / 255.0
     n = all_pixels.shape[0]
 

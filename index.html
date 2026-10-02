@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cluster Lens — K-Means Image Segmentation</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310151a'/%3E%3Ccircle cx='11' cy='11' r='4.6' fill='%23e8a33d'/%3E%3Ccircle cx='21.5' cy='12.5' r='4' fill='%237c5cff'/%3E%3Ccircle cx='16' cy='21.5' r='4.6' fill='%234fc3c3'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -176,6 +177,7 @@ table.error-table tr.best td:first-child{font-weight:600;}
         <div class="step"><span class="n">02</span><div class="t"><strong>Cluster</strong><span><code>main.py</code> runs K-Means (k-means++ initialised) in NumPy, grouping pixels by colour.</span></div></div>
         <div class="step"><span class="n">03</span><div class="t"><strong>Visualise</strong><span>The backend returns the segmented image, already rendered with the grid overlay.</span></div></div>
         <div class="step"><span class="n">04</span><div class="t"><strong>Compare</strong><span>The Graphs tab asks the backend to plot quantisation error against k.</span></div></div>
+        <div class="step"><span class="n">05</span><div class="t"><strong>Export</strong><span>Download the segmented output as a PNG for reports and presentations.</span></div></div>
       </div>
     </div>
 
@@ -203,7 +205,7 @@ table.error-table tr.best td:first-child{font-weight:600;}
       <div id="drop">
         <span class="icon">＋</span>
         <div>Drag an image here, or click to browse</div>
-        <div class="small">JPG, PNG, WebP</div>
+        <div class="small">JPG, PNG, WebP · max 10 MB</div>
         <input id="fileInput" type="file" accept="image/*">
       </div>
     </div>
@@ -284,9 +286,12 @@ table.error-table tr.best td:first-child{font-weight:600;}
     <p class="sub">The people behind Cluster Lens.</p>
     <div class="card">
       <div class="contrib-grid" id="contribGrid">
-        <div class="contrib-slot"><div class="avatar">?</div><div class="name">Awaiting details</div></div>
+        <div class="contrib-slot"><div class="avatar">IPA</div><div class="name"><strong>IPA4-Grp8</strong><br>Roll no. 24155040</div></div>
+        <div class="contrib-slot"><div class="avatar">IPA</div><div class="name"><strong>IPA4-Grp8</strong><br>Roll no. 24155380</div></div>
+        <div class="contrib-slot"><div class="avatar">IPA</div><div class="name"><strong>IPA4-Grp8</strong><br>Roll no. 24155758</div></div>
+        <div class="contrib-slot"><div class="avatar">IPA</div><div class="name"><strong>IPA4-Grp8</strong><br>Roll no. 24155156</div></div>
+        <div class="contrib-slot"><div class="avatar">IPA</div><div class="name"><strong>IPA4-Grp8</strong><br>Roll no. 24155983</div></div>
       </div>
-      <p class="hint" style="margin-top:16px;">Send over names and roles and they'll be added here.</p>
     </div>
   </section>
 
@@ -342,8 +347,16 @@ function resetErrorAnalysis(){
 }
 
 function selectFile(file){
+  if (!file.type.startsWith('image/')) {
+    statusMsg.classList.add('error');
+    statusMsg.textContent = 'Choose a valid image file (PNG, JPEG, or WebP).';
+    return;
+  }
   currentFile = file;
   resetErrorAnalysis();
+  statusMsg.classList.remove('error');
+  statusMsg.textContent = '';
+  downloadBtn.classList.add('hidden');
   settingsStage.classList.remove('hidden');
   resultStage.classList.add('hidden');
 }
@@ -367,7 +380,7 @@ document.getElementById('runBtn').addEventListener('click', async () => {
 
   try {
     const res = await fetch('/api/segment', { method: 'POST', body: formData });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Segmentation failed.');
 
     document.getElementById('origImg').src = 'data:image/png;base64,' + data.original_png;
@@ -419,7 +432,7 @@ document.getElementById('elbowBtn').addEventListener('click', async () => {
 
   try {
     const res = await fetch('/api/elbow', { method: 'POST', body: formData });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Elbow computation failed.');
     const suggestedK = findElbowK(data.k_values, data.mean_errors);
     lastElbowData = { kValues: data.k_values, meanErrors: data.mean_errors, suggestedK };
